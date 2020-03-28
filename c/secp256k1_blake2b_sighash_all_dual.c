@@ -47,39 +47,14 @@ int extract_witness_lock(uint8_t *witness, uint64_t len,
 }
 
 __attribute__((visibility("default"))) int
-validate() {
-  int ret;
-  uint64_t len = 0;
+validate_secp256k1_blake2b_sighash_all(uint8_t *output_public_key_hash) {
   unsigned char temp[TEMP_SIZE];
   unsigned char lock_bytes[SIGNATURE_SIZE];
-
-  /* Load args */
-  unsigned char script[SCRIPT_SIZE];
-  len = SCRIPT_SIZE;
-  ret = ckb_load_script(script, &len, 0);
-  if (ret != CKB_SUCCESS) {
-    return ERROR_SYSCALL;
-  }
-  if (len > SCRIPT_SIZE) {
-    return ERROR_SCRIPT_TOO_LONG;
-  }
-  mol_seg_t script_seg;
-  script_seg.ptr = (uint8_t *)script;
-  script_seg.size = len;
-
-  if (MolReader_Script_verify(&script_seg, false) != MOL_OK) {
-    return ERROR_ENCODING;
-  }
-
-  mol_seg_t args_seg = MolReader_Script_get_args(&script_seg);
-  mol_seg_t args_bytes_seg = MolReader_Bytes_raw_bytes(&args_seg);
-  if (args_bytes_seg.size != BLAKE160_SIZE) {
-    return ERROR_ARGUMENTS_LEN;
-  }
+  uint64_t len = 0;
 
   /* Load witness of first input */
   uint64_t witness_len = MAX_WITNESS_SIZE;
-  ret = ckb_load_witness(temp, &witness_len, 0, 0, CKB_SOURCE_GROUP_INPUT);
+  int ret = ckb_load_witness(temp, &witness_len, 0, 0, CKB_SOURCE_GROUP_INPUT);
   if (ret != CKB_SUCCESS) {
     return ERROR_SYSCALL;
   }
@@ -191,7 +166,47 @@ validate() {
   blake2b_update(&blake2b_ctx, temp, pubkey_size);
   blake2b_final(&blake2b_ctx, temp, BLAKE2B_BLOCK_SIZE);
 
-  if (memcmp(args_bytes_seg.ptr, temp, BLAKE160_SIZE) != 0) {
+  memcpy(output_public_key_hash, temp, BLAKE160_SIZE);
+
+  return CKB_SUCCESS;
+}
+
+__attribute__((visibility("default"))) int
+validate_simple() {
+  int ret;
+  uint64_t len = 0;
+
+  /* Load args */
+  unsigned char script[SCRIPT_SIZE];
+  len = SCRIPT_SIZE;
+  ret = ckb_load_script(script, &len, 0);
+  if (ret != CKB_SUCCESS) {
+    return ERROR_SYSCALL;
+  }
+  if (len > SCRIPT_SIZE) {
+    return ERROR_SCRIPT_TOO_LONG;
+  }
+  mol_seg_t script_seg;
+  script_seg.ptr = (uint8_t *)script;
+  script_seg.size = len;
+
+  if (MolReader_Script_verify(&script_seg, false) != MOL_OK) {
+    return ERROR_ENCODING;
+  }
+
+  mol_seg_t args_seg = MolReader_Script_get_args(&script_seg);
+  mol_seg_t args_bytes_seg = MolReader_Bytes_raw_bytes(&args_seg);
+  if (args_bytes_seg.size != BLAKE160_SIZE) {
+    return ERROR_ARGUMENTS_LEN;
+  }
+
+  uint8_t public_key_hash[BLAKE160_SIZE];
+  ret = validate_secp256k1_blake2b_sighash_all(public_key_hash);
+  if (ret != CKB_SUCCESS) {
+    return ret;
+  }
+
+  if (memcmp(args_bytes_seg.ptr, public_key_hash, BLAKE160_SIZE) != 0) {
     return ERROR_PUBKEY_BLAKE160_HASH;
   }
 
@@ -243,5 +258,5 @@ int main() {
       }
     }
   }
-  return validate();
+  return validate_simple();
 }
